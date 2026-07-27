@@ -146,5 +146,5 @@ final class TitleAnalyzer
             'status' => $status,
             'message' => $message,
         ];
-    
+    }
 }
