@@ -5,41 +5,61 @@ declare(strict_types=1);
 namespace WebAuditKit;
 
 use WebAuditKit\Http\PageFetcher;
+use WebAuditKit\Result\AuditResult;
 
+/**
+ * High-level public API for WebAuditKit.
+ *
+ * Provides convenient methods for auditing supplied HTML
+ * documents and live public URLs.
+ */
 final class WebAuditKit
 {
-    private PageFetcher $fetcher;
     private Auditor $auditor;
 
+    private PageFetcher $pageFetcher;
+
     public function __construct(
-        ?PageFetcher $fetcher = null,
-        ?Auditor $auditor = null
+        ?Auditor $auditor = null,
+        ?PageFetcher $pageFetcher = null
     ) {
-        $this->fetcher = $fetcher ?? new PageFetcher();
         $this->auditor = $auditor ?? new Auditor();
+
+        $this->pageFetcher =
+            $pageFetcher ?? new PageFetcher();
     }
 
     /**
-     * Audit a live website URL.
+     * Audit an existing HTML document.
      *
-     * @return array<string, mixed>
-     */
-    public function auditUrl(string $url): array
-    {
-        $html = $this->fetcher->fetch($url);
-
-        return $this->auditor->audit($html, $url);
-    }
-
-    /**
-     * Audit HTML that has already been retrieved.
-     *
-     * @return array<string, mixed>
+     * @param string $html HTML source to analyze.
+     * @param string $url  Optional source URL.
      */
     public function auditHtml(
         string $html,
         string $url = ''
-    ): array {
-        return $this->auditor->audit($html, $url);
+    ): AuditResult {
+        return $this->auditor->audit(
+            $html,
+            $url
+        );
+    }
+
+    /**
+     * Audit a live public URL.
+     *
+     * The page is fetched through PageFetcher, which performs
+     * URL validation, SSRF protection, redirect validation,
+     * timeout handling, response-size protection, and other
+     * HTTP safety checks.
+     */
+    public function auditUrl(string $url): AuditResult
+    {
+        $html = $this->pageFetcher->fetch($url);
+
+        return $this->auditor->audit(
+            $html,
+            $url
+        );
     }
 }
