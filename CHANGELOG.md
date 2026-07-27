@@ -4,7 +4,17 @@ All notable changes to WebAuditKit will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
+## [Unreleased]
+
+Changes for the next development release will be documented here.
+
+---
+
 ## [0.1.0] - 2026-07-27
+
+First development release of WebAuditKit.
+
+This release establishes the core architecture for secure website fetching, HTML auditing, automated testing, and future SEO audit modules.
 
 ### Added
 
@@ -35,9 +45,3 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 - Added protection against localhost and private network requests
 - Added validation of redirect destinations before connecting
 - Restricted network requests to HTTP and HTTPS
-
-## [0.1.0] - Unreleased
-
-First development release of WebAuditKit.
-
-The initial release establishes the core architecture for secure website fetching, HTML auditing, automated testing, and future SEO audit modules.
