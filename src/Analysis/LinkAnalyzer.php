@@ -70,6 +70,10 @@ final class LinkAnalyzer
             );
         }
 
+        /*
+         * Remove the temporary processing instruction used
+         * to force UTF-8 parsing.
+         */
         foreach ($document->childNodes as $node) {
             if ($node->nodeType === XML_PI_NODE) {
                 $document->removeChild($node);
@@ -216,6 +220,10 @@ final class LinkAnalyzer
 
         $total = count($links);
 
+        /*
+         * JavaScript URLs are treated as the highest-priority
+         * link issue.
+         */
         if ($javascript > 0) {
             return $this->result(
                 $links,
@@ -236,6 +244,9 @@ final class LinkAnalyzer
             );
         }
 
+        /*
+         * Missing or empty href attributes are warnings.
+         */
         if ($missingHref > 0 || $emptyHref > 0) {
             return $this->result(
                 $links,
@@ -275,98 +286,139 @@ final class LinkAnalyzer
         );
     }
 
-    private function determineType(
-    ?string $href,
-    ?string $baseUrl
-): string {
-    if ($href === null) {
-        return 'missing';
-    }
-
-    if ($href === '') {
-        return 'empty';
-    }
-
-    if (str_starts_with($href, '#')) {
-        return 'anchor';
-    }
-
-    if (preg_match('/^mailto:/i', $href) === 1) {
-        return 'mailto';
-    }
-
-    if (preg_match('/^tel:/i', $href) === 1) {
-        return 'tel';
-    }
-
-    if (preg_match('/^javascript:/i', $href) === 1) {
-        return 'javascript';
-    }
-
-    /*
-     * Protocol-relative URLs must be checked before root-relative
-     * URLs because "//example.com" also starts with "/".
+    /**
+     * Determine the type of a link.
      */
-    if (str_starts_with($href, '//')) {
-        $hrefHost = parse_url(
-            'https:' . $href,
-            PHP_URL_HOST
+    private function determineType(
+        ?string $href,
+        ?string $baseUrl
+    ): string {
+        if ($href === null) {
+            return 'missing';
+        }
+
+        if ($href === '') {
+            return 'empty';
+        }
+
+        /*
+         * Fragment / anchor link.
+         */
+        if (str_starts_with($href, '#')) {
+            return 'anchor';
+        }
+
+        /*
+         * Email link.
+         */
+        if (preg_match('/^mailto:/i', $href) === 1) {
+            return 'mailto';
+        }
+
+        /*
+         * Telephone link.
+         */
+        if (preg_match('/^tel:/i', $href) === 1) {
+            return 'tel';
+        }
+
+        /*
+         * JavaScript URL.
+         */
+        if (preg_match('/^javascript:/i', $href) === 1) {
+            return 'javascript';
+        }
+
+        /*
+         * Protocol-relative URLs must be checked BEFORE
+         * root-relative URLs.
+         *
+         * Example:
+         *
+         * //example.com/page
+         *
+         * also starts with "/", so checking "/" first would
+         * incorrectly classify it as an internal relative URL.
+         */
+        if (str_starts_with($href, '//')) {
+            $hrefHost = parse_url(
+                'https:' . $href,
+                PHP_URL_HOST
+            );
+
+            $baseHost = $this->getHost($baseUrl);
+
+            if (
+                $baseHost !== null &&
+                $hrefHost !== null &&
+                strcasecmp($hrefHost, $baseHost) === 0
+            ) {
+                return 'internal';
+            }
+
+            return 'external';
+        }
+
+        /*
+         * Root-relative and relative URLs are internal.
+         */
+        if (
+            str_starts_with($href, '/') ||
+            str_starts_with($href, './') ||
+            str_starts_with($href, '../') ||
+            preg_match('/^[a-z][a-z0-9+.-]*:/i', $href) !== 1
+        ) {
+            return 'internal';
+        }
+
+        /*
+         * Absolute HTTP/HTTPS URLs.
+         */
+        $scheme = strtolower(
+            (string) parse_url(
+                $href,
+                PHP_URL_SCHEME
+            )
         );
 
-        $baseHost = $this->getHost($baseUrl);
+        if ($scheme === 'http' || $scheme === 'https') {
+            $hrefHost = parse_url(
+                $href,
+                PHP_URL_HOST
+            );
 
-        if (
-            $baseHost !== null &&
-            $hrefHost !== null &&
-            strcasecmp($hrefHost, $baseHost) === 0
-        ) {
-            return 'internal';
+            $baseHost = $this->getHost($baseUrl);
+
+            if (
+                $baseHost !== null &&
+                $hrefHost !== null &&
+                strcasecmp($hrefHost, $baseHost) === 0
+            ) {
+                return 'internal';
+            }
+
+            return 'external';
         }
 
-        return 'external';
+        /*
+         * Any scheme not explicitly handled above.
+         */
+        return 'other';
     }
 
-    /*
-     * Relative and root-relative URLs are internal.
+    /**
+     * Extract a hostname from the base URL.
      */
-    if (
-        str_starts_with($href, '/') ||
-        str_starts_with($href, './') ||
-        str_starts_with($href, '../') ||
-        !preg_match('/^[a-z][a-z0-9+.-]*:/i', $href)
-    ) {
-        return 'internal';
-    }
-
-    $scheme = strtolower(
-        (string) parse_url($href, PHP_URL_SCHEME)
-    );
-
-    if ($scheme === 'http' || $scheme === 'https') {
-        $hrefHost = parse_url($href, PHP_URL_HOST);
-        $baseHost = $this->getHost($baseUrl);
-
-        if (
-            $baseHost !== null &&
-            $hrefHost !== null &&
-            strcasecmp($hrefHost, $baseHost) === 0
-        ) {
-            return 'internal';
-        }
-
-        return 'external';
-    }
-
-    return 'other';
-}
-
     private function getHost(?string $url): ?string
     {
         if ($url === null || trim($url) === '') {
             return null;
         }
 
-        $host = parse_url($url, PHP_URL_HOST);
+        $host = parse_url(
+            $url,
+            PHP_URL_HOST
+        );
 
         return is_string($host) && $host !== ''
             ? $host
@@ -374,6 +426,8 @@ final class LinkAnalyzer
     }
 
     /**
+     * Build the analysis result.
+     *
      * @param array<int, array{
      *     href: ?string,
      *     text: string,
@@ -384,6 +438,33 @@ final class LinkAnalyzer
      *     sponsored: bool,
      *     ugc: bool
      * }> $links
+     *
+     * @return array{
+     *     links: array<int, array{
+     *         href: ?string,
+     *         text: string,
+     *         type: string,
+     *         has_href: bool,
+     *         empty_href: bool,
+     *         nofollow: bool,
+     *         sponsored: bool,
+     *         ugc: bool
+     *     }>,
+     *     total: int,
+     *     internal: int,
+     *     external: int,
+     *     anchors: int,
+     *     mailto: int,
+     *     tel: int,
+     *     javascript: int,
+     *     missing_href: int,
+     *     empty_href: int,
+     *     nofollow: int,
+     *     sponsored: int,
+     *     ugc: int,
+     *     status: string,
+     *     message: string
+     * }
      */
     private function result(
         array $links,
@@ -421,6 +502,9 @@ final class LinkAnalyzer
         ];
     }
 
+    /**
+     * Build an empty analysis result.
+     */
     private function emptyResult(
         string $status,
         string $message
