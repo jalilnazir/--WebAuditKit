@@ -276,88 +276,89 @@ final class LinkAnalyzer
     }
 
     private function determineType(
-        ?string $href,
-        ?string $baseUrl
-    ): string {
-        if ($href === null) {
-            return 'missing';
-        }
+    ?string $href,
+    ?string $baseUrl
+): string {
+    if ($href === null) {
+        return 'missing';
+    }
 
-        if ($href === '') {
-            return 'empty';
-        }
+    if ($href === '') {
+        return 'empty';
+    }
 
-        if (str_starts_with($href, '#')) {
-            return 'anchor';
-        }
+    if (str_starts_with($href, '#')) {
+        return 'anchor';
+    }
 
-        if (preg_match('/^mailto:/i', $href) === 1) {
-            return 'mailto';
-        }
+    if (preg_match('/^mailto:/i', $href) === 1) {
+        return 'mailto';
+    }
 
-        if (preg_match('/^tel:/i', $href) === 1) {
-            return 'tel';
-        }
+    if (preg_match('/^tel:/i', $href) === 1) {
+        return 'tel';
+    }
 
-        if (preg_match('/^javascript:/i', $href) === 1) {
-            return 'javascript';
-        }
+    if (preg_match('/^javascript:/i', $href) === 1) {
+        return 'javascript';
+    }
 
-        /*
-         * Relative and root-relative URLs are internal.
-         */
+    /*
+     * Protocol-relative URLs must be checked before root-relative
+     * URLs because "//example.com" also starts with "/".
+     */
+    if (str_starts_with($href, '//')) {
+        $hrefHost = parse_url(
+            'https:' . $href,
+            PHP_URL_HOST
+        );
+
+        $baseHost = $this->getHost($baseUrl);
+
         if (
-            str_starts_with($href, '/') ||
-            str_starts_with($href, './') ||
-            str_starts_with($href, '../') ||
-            !preg_match('/^[a-z][a-z0-9+.-]*:/i', $href)
+            $baseHost !== null &&
+            $hrefHost !== null &&
+            strcasecmp($hrefHost, $baseHost) === 0
         ) {
             return 'internal';
         }
 
-        /*
-         * Protocol-relative URLs.
-         */
-        if (str_starts_with($href, '//')) {
-            $hrefHost = parse_url(
-                'https:' . $href,
-                PHP_URL_HOST
-            );
-
-            $baseHost = $this->getHost($baseUrl);
-
-            if (
-                $baseHost !== null &&
-                $hrefHost !== null &&
-                strcasecmp($hrefHost, $baseHost) === 0
-            ) {
-                return 'internal';
-            }
-
-            return 'external';
-        }
-
-        $scheme = strtolower(
-            (string) parse_url($href, PHP_URL_SCHEME)
-        );
-
-        if ($scheme === 'http' || $scheme === 'https') {
-            $hrefHost = parse_url($href, PHP_URL_HOST);
-            $baseHost = $this->getHost($baseUrl);
-
-            if (
-                $baseHost !== null &&
-                $hrefHost !== null &&
-                strcasecmp($hrefHost, $baseHost) === 0
-            ) {
-                return 'internal';
-            }
-
-            return 'external';
-        }
-
-        return 'other';
+        return 'external';
     }
+
+    /*
+     * Relative and root-relative URLs are internal.
+     */
+    if (
+        str_starts_with($href, '/') ||
+        str_starts_with($href, './') ||
+        str_starts_with($href, '../') ||
+        !preg_match('/^[a-z][a-z0-9+.-]*:/i', $href)
+    ) {
+        return 'internal';
+    }
+
+    $scheme = strtolower(
+        (string) parse_url($href, PHP_URL_SCHEME)
+    );
+
+    if ($scheme === 'http' || $scheme === 'https') {
+        $hrefHost = parse_url($href, PHP_URL_HOST);
+        $baseHost = $this->getHost($baseUrl);
+
+        if (
+            $baseHost !== null &&
+            $hrefHost !== null &&
+            strcasecmp($hrefHost, $baseHost) === 0
+        ) {
+            return 'internal';
+        }
+
+        return 'external';
+    }
+
+    return 'other';
+}
 
     private function getHost(?string $url): ?string
     {
