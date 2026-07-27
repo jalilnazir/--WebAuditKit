@@ -12,12 +12,14 @@ final class PageFetcher
 {
     private int $timeout;
     private int $maxBytes;
+    private int $maxRedirects;
     private UrlGuard $urlGuard;
 
     public function __construct(
         int $timeout = 15,
         int $maxBytes = 5_000_000,
-        ?UrlGuard $urlGuard = null
+        ?UrlGuard $urlGuard = null,
+        int $maxRedirects = 5
     ) {
         if ($timeout < 1) {
             throw new InvalidArgumentException(
@@ -31,8 +33,15 @@ final class PageFetcher
             );
         }
 
+        if ($maxRedirects < 0) {
+            throw new InvalidArgumentException(
+                'Maximum redirects cannot be negative.'
+            );
+        }
+
         $this->timeout = $timeout;
         $this->maxBytes = $maxBytes;
+        $this->maxRedirects = $maxRedirects;
         $this->urlGuard = $urlGuard ?? new UrlGuard();
     }
 
@@ -41,13 +50,100 @@ final class PageFetcher
      */
     public function fetch(string $url): string
     {
-        /*
-         * Validate the destination before opening a network
-         * connection. This blocks localhost, private networks,
-         * reserved IPs, and unsupported URL schemes.
-         */
-        $this->urlGuard->assertSafe($url);
+        $currentUrl = $url;
 
+        for (
+            $redirects = 0;
+            $redirects <= $this->maxRedirects;
+            $redirects++
+        ) {
+            /*
+             * Every destination is validated before connecting.
+             * This includes the original URL and every redirect.
+             */
+            $this->urlGuard->assertSafe($currentUrl);
+
+            $response = $this->request($currentUrl);
+
+            if ($this->isRedirect($response['status'])) {
+                if ($redirects >= $this->maxRedirects) {
+                    throw new RuntimeException(
+                        'Maximum redirect limit exceeded.'
+                    );
+                }
+
+                $location = $response['location'];
+
+                if ($location === null || $location === '') {
+                    throw new RuntimeException(
+                        'Redirect response did not contain a Location header.'
+                    );
+                }
+
+                $currentUrl = $this->resolveUrl(
+                    $currentUrl,
+                    $location
+                );
+
+                continue;
+            }
+
+            if (
+                $response['status'] < 200 ||
+                $response['status'] >= 400
+            ) {
+                throw new RuntimeException(
+                    sprintf(
+                        'URL returned HTTP status %d.',
+                        $response['status']
+                    )
+                );
+            }
+
+            $contentType = $response['content_type'];
+
+            if (
+                $contentType !== '' &&
+                stripos(
+                    $contentType,
+                    'text/html'
+                ) === false &&
+                stripos(
+                    $contentType,
+                    'application/xhtml+xml'
+                ) === false
+            ) {
+                throw new RuntimeException(
+                    'URL did not return an HTML document.'
+                );
+            }
+
+            if (trim($response['body']) === '') {
+                throw new RuntimeException(
+                    'URL returned an empty response.'
+                );
+            }
+
+            return $response['body'];
+        }
+
+        throw new RuntimeException(
+            'Unable to complete HTTP request.'
+        );
+    }
+
+    /**
+     * Perform one HTTP request without automatically following redirects.
+     *
+     * @return array{
+     *     status: int,
+     *     content_type: string,
+     *     location: ?string,
+     *     body: string
+     * }
+     */
+    private function request(string $url): array
+    {
         if (!function_exists('curl_init')) {
             throw new RuntimeException(
                 'The PHP cURL extension is required.'
@@ -63,26 +159,44 @@ final class PageFetcher
         }
 
         $body = '';
+        $location = null;
         $tooLarge = false;
 
         curl_setopt_array($handle, [
             CURLOPT_URL => $url,
-            CURLOPT_FOLLOWLOCATION => true,
-            CURLOPT_MAXREDIRS => 5,
+
+            /*
+             * Redirects are intentionally handled manually so
+             * every destination can pass through UrlGuard.
+             */
+            CURLOPT_FOLLOWLOCATION => false,
+
             CURLOPT_CONNECTTIMEOUT => $this->timeout,
             CURLOPT_TIMEOUT => $this->timeout,
 
-            CURLOPT_USERAGENT =>
-                'WebAuditKit/0.1',
+            CURLOPT_USERAGENT => 'WebAuditKit/0.1',
 
             CURLOPT_RETURNTRANSFER => false,
-            CURLOPT_HEADER => false,
 
             CURLOPT_PROTOCOLS =>
                 CURLPROTO_HTTP | CURLPROTO_HTTPS,
 
-            CURLOPT_REDIR_PROTOCOLS =>
-                CURLPROTO_HTTP | CURLPROTO_HTTPS,
+            CURLOPT_HEADERFUNCTION => function (
+                $curl,
+                string $header
+            ) use (&$location): int {
+                $length = strlen($header);
+
+                if (
+                    stripos($header, 'Location:') === 0
+                ) {
+                    $location = trim(
+                        substr($header, 9)
+                    );
+                }
+
+                return $length;
+            },
 
             CURLOPT_WRITEFUNCTION => function (
                 $curl,
@@ -134,37 +248,108 @@ final class PageFetcher
             );
         }
 
-        if ($status < 200 || $status >= 400) {
-            throw new RuntimeException(
-                sprintf(
-                    'URL returned HTTP status %d.',
-                    $status
-                )
-            );
-        }
+        return [
+            'status' => $status,
+            'content_type' => $contentType,
+            'location' => $location,
+            'body' => $body,
+        ];
+    }
 
+    private function isRedirect(int $status): bool
+    {
+        return in_array(
+            $status,
+            [301, 302, 303, 307, 308],
+            true
+        );
+    }
+
+    /**
+     * Resolve an absolute or relative redirect URL.
+     */
+    private function resolveUrl(
+        string $baseUrl,
+        string $location
+    ): string {
+        /*
+         * Already an absolute URL.
+         */
         if (
-            $contentType !== '' &&
-            stripos(
-                $contentType,
-                'text/html'
-            ) === false &&
-            stripos(
-                $contentType,
-                'application/xhtml+xml'
-            ) === false
+            filter_var(
+                $location,
+                FILTER_VALIDATE_URL
+            ) !== false
         ) {
+            return $location;
+        }
+
+        /*
+         * Scheme-relative URL.
+         */
+        if (str_starts_with($location, '//')) {
+            $scheme = (string) parse_url(
+                $baseUrl,
+                PHP_URL_SCHEME
+            );
+
+            return $scheme . ':' . $location;
+        }
+
+        $scheme = (string) parse_url(
+            $baseUrl,
+            PHP_URL_SCHEME
+        );
+
+        $host = (string) parse_url(
+            $baseUrl,
+            PHP_URL_HOST
+        );
+
+        $port = parse_url(
+            $baseUrl,
+            PHP_URL_PORT
+        );
+
+        if ($scheme === '' || $host === '') {
             throw new RuntimeException(
-                'URL did not return an HTML document.'
+                'Unable to resolve redirect URL.'
             );
         }
 
-        if (trim($body) === '') {
-            throw new RuntimeException(
-                'URL returned an empty response.'
-            );
+        $origin = $scheme . '://' . $host;
+
+        if (is_int($port)) {
+            $origin .= ':' . $port;
         }
 
-        return $body;
+        /*
+         * Root-relative redirect.
+         */
+        if (str_starts_with($location, '/')) {
+            return $origin . $location;
+        }
+
+        $path = (string) parse_url(
+            $baseUrl,
+            PHP_URL_PATH
+        );
+
+        $directory = '/';
+
+        if ($path !== '' && $path !== '/') {
+            $directory = rtrim(
+                str_replace(
+                    '\\',
+                    '/',
+                    dirname($path)
+                ),
+                '/'
+            ) . '/';
+        }
+
+        return $origin .
+            $directory .
+            $location;
     }
 }
