@@ -73,7 +73,11 @@ final class TitleAnalyzer
         }
 
         $title = trim(
-            preg_replace('/\s+/u', ' ', $nodes->item(0)?->textContent ?? '') ?? ''
+            preg_replace(
+                '/\s+/u',
+                ' ',
+                $nodes->item(0)?->textContent ?? ''
+            ) ?? ''
         );
 
         if ($title === '') {
@@ -86,7 +90,7 @@ final class TitleAnalyzer
             );
         }
 
-        $length = mb_strlen($title);
+        $length = mb_strlen($title, 'UTF-8');
 
         if ($length < self::RECOMMENDED_MIN_LENGTH) {
             return $this->result(
@@ -118,6 +122,8 @@ final class TitleAnalyzer
     }
 
     /**
+     * Build a normalized title-analysis result.
+     *
      * @return array{
      *     title: ?string,
      *     exists: bool,
