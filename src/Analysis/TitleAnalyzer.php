@@ -122,6 +122,8 @@ final class TitleAnalyzer
     }
 
     /**
+     * Build a consistent analysis result.
+     *
      * @return array{
      *     title: ?string,
      *     exists: bool,
