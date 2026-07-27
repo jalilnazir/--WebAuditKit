@@ -40,8 +40,14 @@ final class TitleAnalyzer
         $previous = libxml_use_internal_errors(true);
 
         try {
+            /*
+             * DOMDocument's HTML parser may interpret UTF-8 content using
+             * the wrong encoding when the document does not explicitly
+             * declare one. Prefixing the document with an XML encoding
+             * declaration ensures Unicode titles are decoded correctly.
+             */
             $loaded = $document->loadHTML(
-                $html,
+                '<?xml encoding="UTF-8">' . $html,
                 LIBXML_NOERROR | LIBXML_NOWARNING
             );
         } finally {
@@ -57,6 +63,17 @@ final class TitleAnalyzer
                 'error',
                 'The HTML document could not be parsed.'
             );
+        }
+
+        /*
+         * Remove the temporary XML processing instruction that was added
+         * only to force UTF-8 parsing.
+         */
+        foreach ($document->childNodes as $node) {
+            if ($node->nodeType === XML_PI_NODE) {
+                $document->removeChild($node);
+                break;
+            }
         }
 
         $xpath = new DOMXPath($document);
@@ -90,7 +107,10 @@ final class TitleAnalyzer
             );
         }
 
-        $length = mb_strlen($title);
+        /*
+         * Count Unicode characters rather than raw bytes.
+         */
+        $length = mb_strlen($title, 'UTF-8');
 
         if ($length < self::RECOMMENDED_MIN_LENGTH) {
             return $this->result(
