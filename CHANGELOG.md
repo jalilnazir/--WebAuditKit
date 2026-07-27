@@ -4,7 +4,7 @@ All notable changes to WebAuditKit will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
-## [Unreleased]
+## [0.1.0] - 2026-07-27
 
 ### Added
 
