@@ -6,15 +6,18 @@ namespace WebAuditKit\Http;
 
 use InvalidArgumentException;
 use RuntimeException;
+use WebAuditKit\Security\UrlGuard;
 
 final class PageFetcher
 {
     private int $timeout;
     private int $maxBytes;
+    private UrlGuard $urlGuard;
 
     public function __construct(
         int $timeout = 15,
-        int $maxBytes = 5_000_000
+        int $maxBytes = 5_000_000,
+        ?UrlGuard $urlGuard = null
     ) {
         if ($timeout < 1) {
             throw new InvalidArgumentException(
@@ -30,11 +33,20 @@ final class PageFetcher
 
         $this->timeout = $timeout;
         $this->maxBytes = $maxBytes;
+        $this->urlGuard = $urlGuard ?? new UrlGuard();
     }
 
+    /**
+     * Fetch an HTML document from a public HTTP/HTTPS URL.
+     */
     public function fetch(string $url): string
     {
-        $this->validateUrl($url);
+        /*
+         * Validate the destination before opening a network
+         * connection. This blocks localhost, private networks,
+         * reserved IPs, and unsupported URL schemes.
+         */
+        $this->urlGuard->assertSafe($url);
 
         if (!function_exists('curl_init')) {
             throw new RuntimeException(
@@ -59,12 +71,18 @@ final class PageFetcher
             CURLOPT_MAXREDIRS => 5,
             CURLOPT_CONNECTTIMEOUT => $this->timeout,
             CURLOPT_TIMEOUT => $this->timeout,
+
             CURLOPT_USERAGENT =>
-                'WebAuditKit/0.1 (+https://github.com/)',
+                'WebAuditKit/0.1',
+
             CURLOPT_RETURNTRANSFER => false,
             CURLOPT_HEADER => false,
-            CURLOPT_PROTOCOLS => CURLPROTO_HTTP | CURLPROTO_HTTPS,
-            CURLOPT_REDIR_PROTOCOLS => CURLPROTO_HTTP | CURLPROTO_HTTPS,
+
+            CURLOPT_PROTOCOLS =>
+                CURLPROTO_HTTP | CURLPROTO_HTTPS,
+
+            CURLOPT_REDIR_PROTOCOLS =>
+                CURLPROTO_HTTP | CURLPROTO_HTTPS,
 
             CURLOPT_WRITEFUNCTION => function (
                 $curl,
@@ -88,6 +106,7 @@ final class PageFetcher
         $success = curl_exec($handle);
 
         $error = curl_error($handle);
+
         $status = (int) curl_getinfo(
             $handle,
             CURLINFO_RESPONSE_CODE
@@ -109,7 +128,9 @@ final class PageFetcher
         if ($success === false) {
             throw new RuntimeException(
                 'Unable to fetch URL: ' .
-                ($error !== '' ? $error : 'Unknown network error.')
+                ($error !== ''
+                    ? $error
+                    : 'Unknown network error.')
             );
         }
 
@@ -124,8 +145,14 @@ final class PageFetcher
 
         if (
             $contentType !== '' &&
-            stripos($contentType, 'text/html') === false &&
-            stripos($contentType, 'application/xhtml+xml') === false
+            stripos(
+                $contentType,
+                'text/html'
+            ) === false &&
+            stripos(
+                $contentType,
+                'application/xhtml+xml'
+            ) === false
         ) {
             throw new RuntimeException(
                 'URL did not return an HTML document.'
@@ -139,26 +166,5 @@ final class PageFetcher
         }
 
         return $body;
-    }
-
-    private function validateUrl(string $url): void
-    {
-        if (
-            filter_var($url, FILTER_VALIDATE_URL) === false
-        ) {
-            throw new InvalidArgumentException(
-                'A valid URL is required.'
-            );
-        }
-
-        $scheme = strtolower(
-            (string) parse_url($url, PHP_URL_SCHEME)
-        );
-
-        if (!in_array($scheme, ['http', 'https'], true)) {
-            throw new InvalidArgumentException(
-                'Only HTTP and HTTPS URLs are supported.'
-            );
-        }
     }
 }
