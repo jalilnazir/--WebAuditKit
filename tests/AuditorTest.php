@@ -7,6 +7,7 @@ namespace WebAuditKit\Tests;
 use InvalidArgumentException;
 use PHPUnit\Framework\TestCase;
 use WebAuditKit\Auditor;
+use WebAuditKit\Result\AuditResult;
 
 final class AuditorTest extends TestCase
 {
@@ -23,7 +24,10 @@ final class AuditorTest extends TestCase
         content="This is an example meta description used to test the WebAuditKit website auditing engine and its SEO analysis functionality."
     >
 
-    <meta name="robots" content="index, follow">
+    <meta
+        name="robots"
+        content="index, follow"
+    >
 
     <link
         rel="canonical"
@@ -34,15 +38,6 @@ final class AuditorTest extends TestCase
 <body>
     <h1>Example Website</h1>
     <h2>About This Page</h2>
-
-    <img
-        src="/image.jpg"
-        alt="Example image"
-    >
-
-    <a href="/about">About</a>
-    <a href="https://example.com/contact">Contact</a>
-    <a href="https://external.example">External</a>
 </body>
 </html>
 HTML;
@@ -54,83 +49,158 @@ HTML;
             'https://example.com/test'
         );
 
+        self::assertInstanceOf(
+            AuditResult::class,
+            $result
+        );
+
         self::assertSame(
             'https://example.com/test',
-            $result['url']
+            $result->url()
+        );
+
+        self::assertSame(
+            5,
+            $result->totalCount()
         );
 
         self::assertTrue(
-            $result['title']['exists']
+            $result->hasCheck('title')
         );
+
+        self::assertTrue(
+            $result->hasCheck('meta_description')
+        );
+
+        self::assertTrue(
+            $result->hasCheck('headings')
+        );
+
+        self::assertTrue(
+            $result->hasCheck('canonical')
+        );
+
+        self::assertTrue(
+            $result->hasCheck('robots')
+        );
+
+        $title = $result->check('title');
+
+        self::assertNotNull($title);
+        self::assertTrue($title['exists']);
 
         self::assertSame(
             'Example Website SEO Audit Test Page',
-            $result['title']['value']
-        );
-
-        self::assertTrue(
-            $result['meta_description']['exists']
+            $title['title']
         );
 
         self::assertSame(
-            ['Example Website'],
-            $result['headings']['h1']
+            'pass',
+            $title['status']
         );
+
+        $description = $result->check(
+            'meta_description'
+        );
+
+        self::assertNotNull($description);
+        self::assertTrue($description['exists']);
 
         self::assertSame(
-            ['About This Page'],
-            $result['headings']['h2']
+            'pass',
+            $description['status']
         );
 
-        self::assertTrue(
-            $result['canonical']['exists']
-        );
+        $headings = $result->check('headings');
 
-        self::assertSame(
-            'https://example.com/test',
-            $result['canonical']['value']
-        );
-
-        self::assertFalse(
-            $result['robots']['noindex']
-        );
-
-        self::assertFalse(
-            $result['robots']['nofollow']
-        );
+        self::assertNotNull($headings);
 
         self::assertSame(
             1,
-            $result['images']['total']
+            $headings['h1_count']
         );
 
-        self::assertSame(
-            0,
-            $result['images']['missing_alt']
+        self::assertTrue(
+            $headings['has_h1']
         );
 
-        self::assertSame(
-            0,
-            $result['images']['empty_alt']
-        );
-
-        self::assertSame(
-            3,
-            $result['links']['total']
+        self::assertFalse(
+            $headings['multiple_h1']
         );
 
         self::assertSame(
             2,
-            $result['links']['internal']
+            $headings['total']
+        );
+
+        self::assertSame(
+            'Example Website',
+            $headings['headings'][0]['text']
         );
 
         self::assertSame(
             1,
-            $result['links']['external']
+            $headings['headings'][0]['level']
+        );
+
+        self::assertSame(
+            'About This Page',
+            $headings['headings'][1]['text']
+        );
+
+        self::assertSame(
+            2,
+            $headings['headings'][1]['level']
+        );
+
+        $canonical = $result->check('canonical');
+
+        self::assertNotNull($canonical);
+        self::assertTrue($canonical['exists']);
+
+        self::assertSame(
+            'https://example.com/test',
+            $canonical['canonical']
+        );
+
+        self::assertTrue(
+            $canonical['self_referencing']
+        );
+
+        self::assertSame(
+            'pass',
+            $canonical['status']
+        );
+
+        $robots = $result->check('robots');
+
+        self::assertNotNull($robots);
+        self::assertTrue($robots['exists']);
+        self::assertTrue($robots['indexable']);
+        self::assertTrue($robots['followable']);
+        self::assertFalse($robots['conflicting']);
+
+        self::assertSame(
+            ['index', 'follow'],
+            $robots['directives']
+        );
+
+        self::assertSame(
+            'pass',
+            $robots['status']
+        );
+
+        self::assertSame(
+            'pass',
+            $result->status()
+        );
+
+        self::assertTrue(
+            $result->hasPassed()
         );
     }
 
-    public function testMissingSeoElementsGenerateWarnings(): void
+    public function testMissingSeoElementsAreReported(): void
     {
         $html = <<<'HTML'
 <!DOCTYPE html>
@@ -140,8 +210,6 @@ HTML;
 
 <body>
     <p>Page without important SEO elements.</p>
-
-    <img src="/missing-alt.jpg">
 </body>
 </html>
 HTML;
@@ -153,46 +221,83 @@ HTML;
             'https://example.com'
         );
 
-        self::assertFalse(
-            $result['title']['exists']
+        self::assertInstanceOf(
+            AuditResult::class,
+            $result
         );
 
-        self::assertFalse(
-            $result['meta_description']['exists']
+        $title = $result->check('title');
+
+        self::assertNotNull($title);
+        self::assertFalse($title['exists']);
+        self::assertNull($title['title']);
+        self::assertSame('error', $title['status']);
+
+        $description = $result->check(
+            'meta_description'
         );
 
-        self::assertFalse(
-            $result['canonical']['exists']
+        self::assertNotNull($description);
+        self::assertFalse($description['exists']);
+        self::assertNull($description['description']);
+
+        self::assertSame(
+            'error',
+            $description['status']
         );
+
+        $headings = $result->check('headings');
+
+        self::assertNotNull($headings);
 
         self::assertSame(
             0,
-            count($result['headings']['h1'])
+            $headings['h1_count']
+        );
+
+        self::assertFalse(
+            $headings['has_h1']
         );
 
         self::assertSame(
-            1,
-            $result['images']['missing_alt']
+            'warning',
+            $headings['status']
         );
 
-        self::assertContains(
-            'Page title is missing.',
-            $result['summary']['warnings']
+        $canonical = $result->check('canonical');
+
+        self::assertNotNull($canonical);
+        self::assertFalse($canonical['exists']);
+        self::assertNull($canonical['canonical']);
+
+        self::assertSame(
+            'warning',
+            $canonical['status']
         );
 
-        self::assertContains(
-            'Meta description is missing.',
-            $result['summary']['warnings']
+        /*
+         * No robots meta tag means the normal crawler
+         * default is index, follow.
+         */
+        $robots = $result->check('robots');
+
+        self::assertNotNull($robots);
+        self::assertFalse($robots['exists']);
+        self::assertTrue($robots['indexable']);
+        self::assertTrue($robots['followable']);
+
+        self::assertSame(
+            'pass',
+            $robots['status']
         );
 
-        self::assertContains(
-            'No H1 heading found.',
-            $result['summary']['warnings']
+        self::assertSame(
+            'error',
+            $result->status()
         );
 
-        self::assertContains(
-            'Canonical URL is missing.',
-            $result['summary']['warnings']
+        self::assertTrue(
+            $result->hasErrors()
         );
     }
 
@@ -220,12 +325,35 @@ HTML;
 
         $result = $auditor->audit($html);
 
-        self::assertTrue(
-            $result['robots']['noindex']
+        $robots = $result->check('robots');
+
+        self::assertNotNull($robots);
+
+        self::assertContains(
+            'noindex',
+            $robots['directives']
         );
 
-        self::assertTrue(
-            $result['robots']['nofollow']
+        self::assertContains(
+            'nofollow',
+            $robots['directives']
+        );
+
+        self::assertFalse(
+            $robots['indexable']
+        );
+
+        self::assertFalse(
+            $robots['followable']
+        );
+
+        self::assertFalse(
+            $robots['conflicting']
+        );
+
+        self::assertSame(
+            'warning',
+            $robots['status']
         );
     }
 
@@ -249,14 +377,119 @@ HTML;
 
         $result = $auditor->audit($html);
 
-        self::assertCount(
+        $headings = $result->check('headings');
+
+        self::assertNotNull($headings);
+
+        self::assertSame(
             2,
-            $result['headings']['h1']
+            $headings['h1_count']
         );
 
-        self::assertContains(
-            'Multiple H1 headings were found.',
-            $result['summary']['warnings']
+        self::assertTrue(
+            $headings['has_h1']
+        );
+
+        self::assertTrue(
+            $headings['multiple_h1']
+        );
+
+        self::assertSame(
+            2,
+            $headings['counts']['h1']
+        );
+
+        self::assertSame(
+            'warning',
+            $headings['status']
+        );
+    }
+
+    public function testAuditWithoutUrlStoresNullUrl(): void
+    {
+        $html = <<<'HTML'
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Complete Website Audit Test</title>
+</head>
+<body>
+    <h1>Website Audit</h1>
+</body>
+</html>
+HTML;
+
+        $auditor = new Auditor();
+
+        $result = $auditor->audit($html);
+
+        self::assertNull(
+            $result->url()
+        );
+    }
+
+    public function testAuditResultCanBeConvertedToArray(): void
+    {
+        $html = <<<'HTML'
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Complete Website Audit Test</title>
+
+    <meta
+        name="description"
+        content="This description contains enough useful content for testing the structured WebAuditKit audit result model."
+    >
+
+    <meta
+        name="robots"
+        content="index, follow"
+    >
+
+    <link
+        rel="canonical"
+        href="https://example.com"
+    >
+</head>
+
+<body>
+    <h1>Complete Website Audit Test</h1>
+</body>
+</html>
+HTML;
+
+        $auditor = new Auditor();
+
+        $result = $auditor->audit(
+            $html,
+            'https://example.com'
+        );
+
+        $array = $result->toArray();
+
+        self::assertSame(
+            'https://example.com',
+            $array['url']
+        );
+
+        self::assertArrayHasKey(
+            'status',
+            $array
+        );
+
+        self::assertArrayHasKey(
+            'summary',
+            $array
+        );
+
+        self::assertArrayHasKey(
+            'checks',
+            $array
+        );
+
+        self::assertCount(
+            5,
+            $array['checks']
         );
     }
 
@@ -264,6 +497,10 @@ HTML;
     {
         $this->expectException(
             InvalidArgumentException::class
+        );
+
+        $this->expectExceptionMessage(
+            'HTML content cannot be empty.'
         );
 
         $auditor = new Auditor();
