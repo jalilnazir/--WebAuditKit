@@ -4,10 +4,13 @@ declare(strict_types=1);
 
 namespace WebAuditKit\Analysis;
 
+use DOMDocument;
+use DOMXPath;
+
 final class TitleAnalyzer
 {
-    public const MIN_RECOMMENDED_LENGTH = 30;
-    public const MAX_RECOMMENDED_LENGTH = 60;
+    private const RECOMMENDED_MIN_LENGTH = 30;
+    private const RECOMMENDED_MAX_LENGTH = 60;
 
     /**
      * Analyze the <title> element of an HTML document.
@@ -16,64 +19,130 @@ final class TitleAnalyzer
      *     title: ?string,
      *     exists: bool,
      *     length: int,
-     *     status: string
+     *     status: string,
+     *     message: string
      * }
      */
     public function analyze(string $html): array
     {
-        $title = $this->extractTitle($html);
-
-        if ($title === null) {
-            return [
-                'title' => null,
-                'exists' => false,
-                'length' => 0,
-                'status' => 'missing',
-            ];
+        if (trim($html) === '') {
+            return $this->result(
+                null,
+                false,
+                0,
+                'error',
+                'The HTML document is empty.'
+            );
         }
 
-        $length = $this->length($title);
+        $document = new DOMDocument();
 
-        if ($length < self::MIN_RECOMMENDED_LENGTH) {
-            $status = 'too_short';
-        } elseif ($length > self::MAX_RECOMMENDED_LENGTH) {
-            $status = 'too_long';
-        } else {
-            $status = 'good';
+        $previous = libxml_use_internal_errors(true);
+
+        try {
+            $loaded = $document->loadHTML(
+                $html,
+                LIBXML_NOERROR | LIBXML_NOWARNING
+            );
+        } finally {
+            libxml_clear_errors();
+            libxml_use_internal_errors($previous);
         }
 
-        return [
-            'title' => $title,
-            'exists' => true,
-            'length' => $length,
-            'status' => $status,
-        ];
-    }
-
-    public function extractTitle(string $html): ?string
-    {
-        if (!preg_match('/<title\b[^>]*>(.*?)<\/title>/is', $html, $matches)) {
-            return null;
+        if ($loaded === false) {
+            return $this->result(
+                null,
+                false,
+                0,
+                'error',
+                'The HTML document could not be parsed.'
+            );
         }
 
-        $title = html_entity_decode(
-            strip_tags($matches[1]),
-            ENT_QUOTES | ENT_HTML5,
-            'UTF-8'
+        $xpath = new DOMXPath($document);
+        $nodes = $xpath->query('//title');
+
+        if ($nodes === false || $nodes->length === 0) {
+            return $this->result(
+                null,
+                false,
+                0,
+                'error',
+                'The page does not contain a title element.'
+            );
+        }
+
+        $title = trim(
+            preg_replace(
+                '/\s+/u',
+                ' ',
+                $nodes->item(0)?->textContent ?? ''
+            ) ?? ''
         );
 
-        $title = preg_replace('/\s+/u', ' ', $title) ?? $title;
-        $title = trim($title);
-
-        return $title === '' ? null : $title;
-    }
-
-    private function length(string $value): int
-    {
-        if (function_exists('mb_strlen')) {
-            return mb_strlen($value, 'UTF-8');
+        if ($title === '') {
+            return $this->result(
+                '',
+                true,
+                0,
+                'error',
+                'The page title is empty.'
+            );
         }
 
-        return strlen($value);
+        $length = mb_strlen($title);
+
+        if ($length < self::RECOMMENDED_MIN_LENGTH) {
+            return $this->result(
+                $title,
+                true,
+                $length,
+                'warning',
+                'The page title is shorter than the recommended range.'
+            );
+        }
+
+        if ($length > self::RECOMMENDED_MAX_LENGTH) {
+            return $this->result(
+                $title,
+                true,
+                $length,
+                'warning',
+                'The page title is longer than the recommended range.'
+            );
+        }
+
+        return $this->result(
+            $title,
+            true,
+            $length,
+            'pass',
+            'The page title is present and within the recommended length range.'
+        );
+    }
+
+    /**
+     * @return array{
+     *     title: ?string,
+     *     exists: bool,
+     *     length: int,
+     *     status: string,
+     *     message: string
+     * }
+     */
+    private function result(
+        ?string $title,
+        bool $exists,
+        int $length,
+        string $status,
+        string $message
+    ): array {
+        return [
+            'title' => $title,
+            'exists' => $exists,
+            'length' => $length,
+            'status' => $status,
+            'message' => $message,
+        ];
     }
 }
