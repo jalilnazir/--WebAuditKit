@@ -1,12 +1,13 @@
+
 # WebAuditKit
 
 **Open-source website auditing toolkit for developers, SEO professionals, and website owners.**
 
-WebAuditKit is an open-source toolkit for analyzing websites for technical SEO, on-page SEO, metadata, links, images, structured data, and common website issues.
+WebAuditKit is an open-source PHP toolkit for analyzing websites for technical SEO, on-page SEO, metadata, links, images, structured data, and common website issues.
 
 The goal is to provide a transparent, extensible, and developer-friendly auditing engine that can be used independently or integrated into other applications.
 
-> **Project Status:** WebAuditKit is currently under active development. APIs and functionality may change before the first stable release.
+> **Project Status:** WebAuditKit is under active development. The public API and functionality may change before the first stable release.
 
 ---
 
@@ -19,13 +20,38 @@ WebAuditKit aims to provide these checks through one open-source auditing engine
 The project is designed around four principles:
 
 - **Open** — auditing logic should be inspectable and extensible.
-- **Modular** — individual audit checks should be reusable.
-- **Developer-friendly** — results should be easy to integrate into other applications.
+- **Modular** — individual audit components should be reusable.
+- **Developer-friendly** — results should be easy to integrate into applications.
 - **Practical** — findings should explain what was detected and why it matters.
 
 ---
 
-## Planned Features
+## Current Capabilities
+
+WebAuditKit already includes foundational components for building secure website audits:
+
+- HTML auditing
+- Live URL fetching
+- HTTP and HTTPS support
+- Redirect handling
+- Response-size limits
+- Request timeouts
+- HTML content-type validation
+- HTTP status validation
+- URL validation
+- SSRF protection
+- Localhost blocking
+- Private and reserved IP blocking
+- Redirect destination validation
+- PHPUnit test suite
+- Automated GitHub Actions testing
+- PHP 8.1+ support
+- Composer/PSR-4 autoloading
+- High-level PHP API
+
+---
+
+## Planned Audit Features
 
 ### On-Page SEO
 
@@ -88,6 +114,7 @@ The project is designed around four principles:
 Planned reporting capabilities include:
 
 - Human-readable audit results
+- Structured array output
 - JSON output
 - Issue severity
 - Passed checks
@@ -97,76 +124,252 @@ Planned reporting capabilities include:
 
 ---
 
-## Example
+## Requirements
 
-The intended workflow is simple:
+WebAuditKit currently requires:
+
+- PHP 8.1 or newer
+- PHP cURL extension
+- PHP DOM extension
+- Composer
+
+Development and automated testing currently target supported PHP versions configured by the project's GitHub Actions workflow.
+
+---
+
+## Installation
+
+WebAuditKit is currently under active development and has not yet reached its first stable release.
+
+Once published as a Composer package, the intended installation method will be:
+
+```bash
+composer require webauditkit/webauditkit
+```
+
+> Until the package is published to a Composer registry, the command above should be considered the planned installation method.
+
+---
+
+## Quick Start
+
+WebAuditKit provides a high-level API through the `WebAuditKit` class.
+
+### Audit Existing HTML
+
+```php
+<?php
+
+require 'vendor/autoload.php';
+
+use WebAuditKit\WebAuditKit;
+
+$kit = new WebAuditKit();
+
+$html = <<<'HTML'
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Example Website</title>
+    <meta
+        name="description"
+        content="Example website description."
+    >
+</head>
+<body>
+    <h1>Example Website</h1>
+</body>
+</html>
+HTML;
+
+$result = $kit->auditHtml(
+    $html,
+    'https://example.com'
+);
+
+print_r($result);
+```
+
+HTML can also be analyzed without supplying a source URL:
+
+```php
+$result = $kit->auditHtml($html);
+```
+
+---
+
+## Audit a Live URL
+
+WebAuditKit includes an HTTP page fetcher for retrieving public HTML documents.
+
+The high-level API is designed to support:
+
+```php
+<?php
+
+require 'vendor/autoload.php';
+
+use WebAuditKit\WebAuditKit;
+
+$kit = new WebAuditKit();
+
+$result = $kit->auditUrl(
+    'https://example.com'
+);
+
+print_r($result);
+```
+
+The URL is validated before the HTTP connection is made.
+
+Redirect destinations are also validated before WebAuditKit follows them.
+
+---
+
+## Audit Flow
+
+The current architecture follows this general workflow:
 
 ```text
 URL
  ↓
+Validate URL
+ ↓
+SSRF Protection
+ ↓
 Fetch Page
+ ↓
+Validate Redirects
  ↓
 Parse HTML
  ↓
 Run Audit Checks
  ↓
-Generate Findings
- ↓
-Return Structured Report
+Return Structured Results
 ```
 
-A future CLI interface may look similar to:
-
-```bash
-webauditkit audit https://example.com
-```
-
-Example conceptual output:
+For HTML supplied directly:
 
 ```text
-WebAuditKit Audit
-
-URL: https://example.com
-
-PASS  HTTPS enabled
-PASS  Page title found
-WARN  Meta description is missing
-PASS  One H1 heading found
-WARN  3 images are missing alt attributes
-PASS  Canonical URL found
-PASS  Open Graph metadata detected
-
-Audit complete.
+HTML
+ ↓
+Parse HTML
+ ↓
+Run Audit Checks
+ ↓
+Return Structured Results
 ```
 
-> The CLI shown above represents the planned interface and may not yet be available.
+---
+
+## Security
+
+Server-side URL fetching creates security risks if arbitrary destinations are accepted without validation.
+
+WebAuditKit therefore includes a URL security layer designed to reduce Server-Side Request Forgery (SSRF) risk.
+
+The current URL guard rejects:
+
+- Invalid URLs
+- Unsupported URL schemes
+- `localhost`
+- `.localhost` hostnames
+- IPv4 loopback addresses
+- IPv6 loopback addresses
+- Private IPv4 networks
+- Link-local addresses
+- Reserved IP addresses
+- Common internal/server metadata destinations through private or reserved address filtering
+
+Only HTTP and HTTPS destinations are supported.
+
+### Redirect Security
+
+WebAuditKit does not rely on unrestricted automatic redirect following.
+
+Redirects are handled explicitly so that each new destination can be validated before another HTTP connection is made.
+
+This prevents a public URL from trivially bypassing the initial URL validation by redirecting to a private or reserved destination.
+
+> Security-sensitive network code should be reviewed carefully before deployment in high-risk or multi-tenant environments. SSRF defense can involve DNS rebinding, resolver behavior, proxy configuration, and infrastructure-specific considerations beyond basic address filtering.
+
+---
+
+## HTTP Fetcher
+
+The HTTP layer currently provides:
+
+- HTTP/HTTPS fetching
+- Configurable timeout
+- Maximum response-size protection
+- HTML content-type validation
+- HTTP status validation
+- Controlled redirect handling
+- Maximum redirect limits
+- Custom user agent
+- URL security validation
+
+Example low-level usage:
+
+```php
+<?php
+
+require 'vendor/autoload.php';
+
+use WebAuditKit\Http\PageFetcher;
+
+$fetcher = new PageFetcher();
+
+$html = $fetcher->fetch(
+    'https://example.com'
+);
+```
 
 ---
 
 ## Architecture
 
-WebAuditKit is intended to use a modular architecture where individual audit rules can operate independently.
+WebAuditKit uses a modular architecture so networking, security, auditing, and future reporting components can evolve independently.
 
-Conceptually:
+Current structure:
 
 ```text
 WebAuditKit
 │
-├── HTTP Client
-├── HTML Parser
-├── Audit Engine
-│   ├── Metadata Checks
-│   ├── Heading Checks
-│   ├── Link Checks
-│   ├── Image Checks
-│   ├── Social Metadata Checks
-│   ├── Structured Data Checks
-│   └── Technical SEO Checks
+├── Public API
+│   └── WebAuditKit
 │
-└── Report Generator
+├── HTTP
+│   └── PageFetcher
+│
+├── Security
+│   └── UrlGuard
+│
+├── Audit Engine
+│   └── Auditor
+│
+└── Tests
+    ├── Auditor tests
+    ├── PageFetcher tests
+    ├── UrlGuard tests
+    └── Public API tests
 ```
 
-This architecture is intended to make it easier for contributors to add new checks without modifying unrelated components.
+Planned expansion:
+
+```text
+Audit Engine
+│
+├── Metadata Checks
+├── Heading Checks
+├── Link Checks
+├── Image Checks
+├── Social Metadata Checks
+├── Structured Data Checks
+└── Technical SEO Checks
+```
+
+The goal is to allow contributors to add audit rules without tightly coupling them to HTTP or security infrastructure.
 
 ---
 
@@ -174,14 +377,24 @@ This architecture is intended to make it easier for contributors to add new chec
 
 ### v0.1 — Core Auditor
 
-- [ ] URL fetching
-- [ ] HTML parsing
+- [x] HTTP/HTTPS URL fetching
+- [x] URL validation
+- [x] Request timeout handling
+- [x] Response-size protection
+- [x] Redirect handling
+- [x] SSRF protection
+- [x] Redirect destination validation
+- [x] High-level PHP API
+- [x] Automated tests
+- [x] GitHub Actions CI
+- [ ] Expand HTML parsing
 - [ ] Page title analysis
 - [ ] Meta description analysis
 - [ ] Heading analysis
 - [ ] Canonical URL detection
 - [ ] Robots meta detection
 - [ ] Basic audit result model
+- [ ] First tagged release
 
 ### v0.2 — Links & Images
 
@@ -193,8 +406,8 @@ This architecture is intended to make it easier for contributors to add new chec
 
 ### v0.3 — Technical SEO
 
-- [ ] HTTP status analysis
-- [ ] Redirect analysis
+- [ ] HTTP status reporting
+- [ ] Advanced redirect analysis
 - [ ] Robots.txt analysis
 - [ ] Sitemap detection
 - [ ] HTTPS checks
@@ -211,8 +424,6 @@ This architecture is intended to make it easier for contributors to add new chec
 - [ ] CLI
 - [ ] JSON reports
 - [ ] Configurable audit rules
-- [ ] Automated tests
-- [ ] CI workflow
 - [ ] Documentation website
 - [ ] Plugin architecture
 - [ ] Full-site crawling
@@ -220,19 +431,70 @@ This architecture is intended to make it easier for contributors to add new chec
 
 ---
 
-## Installation
+## Testing
 
-WebAuditKit is currently under development and is not yet available as a stable package.
+WebAuditKit uses PHPUnit for automated testing.
 
-Installation instructions will be added when the first functional release is published.
+Run the test suite with:
+
+```bash
+composer test
+```
+
+or:
+
+```bash
+vendor/bin/phpunit tests
+```
+
+Tests currently cover areas including:
+
+- Core auditing behavior
+- URL validation
+- Unsupported URL schemes
+- HTTP fetcher configuration
+- Invalid timeout configuration
+- Response-size configuration
+- Localhost rejection
+- IPv4 loopback rejection
+- IPv6 loopback rejection
+- Private network rejection
+- Link-local address rejection
+- Public IP acceptance
+- High-level HTML auditing API
+
+---
+
+## Continuous Integration
+
+WebAuditKit uses GitHub Actions to automatically execute the test suite when code is pushed.
+
+The CI workflow tests the project against multiple supported PHP versions.
+
+This helps identify compatibility problems and regressions before changes are released.
 
 ---
 
 ## Development
 
-The project is in its early development stage.
+Install dependencies:
 
-The initial priority is building a reliable core auditing engine before expanding into crawling, reporting, integrations, and additional audit categories.
+```bash
+composer install
+```
+
+Run tests:
+
+```bash
+composer test
+```
+
+The project uses PSR-4 autoloading:
+
+```text
+WebAuditKit\ → src/
+WebAuditKit\Tests\ → tests/
+```
 
 ---
 
@@ -250,6 +512,7 @@ There are several ways to contribute:
 - Review pull requests
 - Submit bug fixes
 - Propose new features
+- Improve security and HTTP handling
 
 For significant changes, please open an issue first so the proposed implementation can be discussed.
 
@@ -265,7 +528,7 @@ When reporting a bug, please include:
 2. Steps to reproduce it.
 3. Expected behavior.
 4. Actual behavior.
-5. Relevant environment information.
+5. PHP version and relevant environment information.
 6. Error messages or logs where appropriate.
 
 Please remove passwords, API keys, authentication tokens, private URLs, and other sensitive information before submitting an issue.
@@ -288,11 +551,13 @@ This helps turn feature requests into well-defined audit rules.
 
 ---
 
-## Security
+## Reporting Security Vulnerabilities
 
-Please do not publicly disclose security vulnerabilities through normal GitHub issues.
+Please do not publicly disclose suspected security vulnerabilities through normal GitHub issues.
 
-A dedicated security policy and responsible disclosure process will be added as the project develops.
+Until a dedicated security policy and private reporting process are established, avoid publishing exploit details that could put users at risk.
+
+A formal `SECURITY.md` policy is planned before the first stable release.
 
 ---
 
@@ -304,6 +569,7 @@ Planned documentation includes:
 
 - Getting started
 - Installation
+- Public API
 - CLI usage
 - Audit rules
 - Configuration
@@ -311,6 +577,7 @@ Planned documentation includes:
 - Integration examples
 - Architecture
 - Contributor guide
+- Security model
 
 ---
 
